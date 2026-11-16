@@ -1,0 +1,15 @@
+{
+  "name": "agent-office",
+  "version": "1.0.0",
+  "description": "Local 3D virtual office for managing Claude Code sessions",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "hooks": "node tools/install-hooks.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "chokidar": "^3.6.0"
+  }
+}
