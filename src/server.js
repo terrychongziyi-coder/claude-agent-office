@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
 import { loadConfig, saveConfig } from './config.js';
 import { getState, broadcast } from './state.js';
-import { addressees, directives, MODEL_IDS } from './chat.js';
+import { addressees, directives, MODEL_IDS, fromUser, handoff } from './chat.js';
 import { validateWorker, folderError, moveWorker, isBusy, NAME_RE, sendToWorker, interruptWorker, decide, workerChanged, stopWorker, stopAll } from './runner.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -140,7 +140,7 @@ app.post('/api/send', async (req, res) => {
   const blocked = settingsBlocker([w], { model, effort });
   if (blocked) return res.status(409).json({ error: blocked });
   if (applySettings([w], { model, effort })) await saveWorkers();
-  if (rest.trim()) sendToWorker(w, model === undefined && effort === undefined ? text : rest.trim(), onSessionStarted);
+  if (rest.trim()) { fromUser(w.id); sendToWorker(w, model === undefined && effort === undefined ? text : rest.trim(), onSessionStarted); }
   res.json({ ok: true });
 });
 
@@ -174,7 +174,7 @@ app.post('/api/chat', async (req, res) => {
     st.pushOutput(w.session_id, entry);
     broadcast({ type: 'output', session_id: w.session_id, entry });
     // ponytail: the full text (names and directives included) goes through, so each worker sees who else was asked
-    if (message) sendToWorker(w, text, onSessionStarted);
+    if (message) { fromUser(w.id); sendToWorker(w, text, onSessionStarted); }
   }
   // Two busy workers in one folder can overwrite each other's edits; warn, don't block.
   const warnings = [...new Set(targets.map(w => w.cwd))].map(cwd => st.workers.filter(x => x.cwd === cwd && isBusy(x.id)).map(x => x.name))
@@ -213,7 +213,6 @@ app.post('/api/interrupt', (req, res) => {
 app.post('/api/message', (req, res) => {
   const { from_worker_id, from_session_id, to_worker_name, text, hop } = req.body ?? {};
   if (!to_worker_name || !text || typeof text !== 'string' || text.length > 20_000) return res.status(400).json({ error: 'to_worker_name and text (max 20000 characters) required' });
-  if (Number(hop ?? 0) >= 3) return res.status(429).json({ error: 'max_hops_exceeded' });
   const st = getState();
   const target = st.workers.find(w => w.name?.toLowerCase() === String(to_worker_name).toLowerCase() && w.cwd);
   if (!target) return res.status(404).json({ error: 'worker not found or has no project folder' });
@@ -221,6 +220,7 @@ app.post('/api/message', (req, res) => {
     return res.status(409).json({ error: `${target.name} is waiting for the user's answer to a permission prompt. Try again later.` });
   }
   const from = st.workers.find(w => (from_worker_id && w.id === from_worker_id) || (from_session_id && w.session_id === from_session_id));
+  if (!handoff(from?.id, target.id, hop)) return res.status(429).json({ error: 'max_hops_exceeded' });
   const header = from ? `[Message from ${from.name}${from.role ? ` (${from.role})` : ''}, your teammate in agent-office]` : '[Message via agent-office]';
   const entry = { kind: 'handoff', from: from?.name ?? null, to: target.name, message: text, t: new Date().toISOString() };
   st.pushOutput(target.session_id, entry);

@@ -68,3 +68,20 @@ export function addressees(text, workers, projects = []) {
   if (!message && d.model === undefined && d.effort === undefined) return { error: 'Add a message after the name.' };
   return { targets: [...new Set(names.map(byName))], project: d.project, model: d.model, effort: d.effort, message };
 }
+
+// Hop guard for worker-to-worker handoffs. Each worker carries the hop count of the last message it
+// received: 0 from the user, sender's count + 1 from a teammate. A worker whose count has reached
+// MAX_HOPS cannot hand off, so a chain (or a loop) ends after MAX_HOPS handoffs.
+// ponytail: in memory; a server restart also stops every worker, so no chain outlives it.
+export const MAX_HOPS = 3;
+const hops = new Map(); // worker id -> hop count of its latest message
+
+export const fromUser = workerId => hops.set(workerId, 0);
+
+// claimed: the legacy --hop value; the higher of it and the server's own count wins.
+export function handoff(fromId, toId, claimed) {
+  const current = Math.max(hops.get(fromId) ?? 0, Number(claimed) || 0);
+  if (current >= MAX_HOPS) return false;
+  hops.set(toId, current + 1);
+  return true;
+}

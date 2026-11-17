@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { md } from './md.js';
 
 const TOKEN = new URLSearchParams(location.search).get('token') ?? '';
 const USER_NAME = 'Terry';
@@ -758,10 +759,10 @@ function renderLog(keepScroll) {
   if (!w) return;
   const el = $('#log');
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  setHTML($('#log-rows'), logRows(w).map(r => `<div class="ln"><span class="t">${clock(r.at)}</span><span class="tool ${LOG_CLASS[r.tool] || ''}">${esc(r.tool)}</span><span class="m${FULL_ROWS.has(r.tool) ? ' full' : ''}">${esc(r.msg)}${r.sub ? `<span class="sub">${esc(r.sub)}</span>` : ''}</span></div>`).join(''));
+  setHTML($('#log-rows'), logRows(w).map(r => `<div class="ln"><span class="t">${clock(r.at)}</span><span class="tool ${LOG_CLASS[r.tool] || ''}">${esc(r.tool)}</span><span class="m${FULL_ROWS.has(r.tool) ? ' full' : ''}">${r.tool === 'Claude' || r.tool === 'Msg' ? `<div class="md">${md(r.msg)}</div>` : esc(r.msg)}${r.sub ? `<span class="sub">${esc(r.sub)}</span>` : ''}</span></div>`).join(''));
   const text = live[w.session_id];
   $('#log-live').innerHTML = statusOf(w) !== 'working' ? ''
-    : text ? `<div class="ln live"><span class="t">${clock(Date.now())}</span><span class="tool c-sum">Claude</span><span class="m full">${esc(text)}</span></div>`
+    : text ? `<div class="ln live"><span class="t">${clock(Date.now())}</span><span class="tool c-sum">Claude</span><span class="m full"><div class="md">${md(text)}</div></span></div>`
       : '<div class="ln live typing"><span class="t"></span><span class="tool c-read">…</span><span class="m dots"><i></i><i></i><i></i></span></div>';
   if (!keepScroll || atBottom) el.scrollTop = el.scrollHeight;
 }
@@ -873,7 +874,7 @@ function renderChat() {
   const el = $('#c-log'), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   setHTML($('#c-rows'), chatRows().map(r => r.info
     ? `<div class="cm info">${esc(r.w.name)}: ${esc(r.msg)} · ${clock(r.at)}</div>`
-    : r.w ? `<div class="cm${r.err ? ' err' : ''}${r.to ? ' handoff' : ''}">${avatar(r.w, 32)}<div><div class="hd"><button type="button" class="who-btn" data-id="${esc(r.w.id)}">${esc(r.to ? r.from : r.w.name)}</button>${r.to ? `<span>→</span><button type="button" class="who-btn" data-id="${esc(workers.find(x => x.name === r.to)?.id ?? '')}">${esc(r.to)}</button>` : ''}<span>${clock(r.at)}</span></div><div class="bd">${esc(r.msg)}</div></div></div>`
+    : r.w ? `<div class="cm${r.err ? ' err' : ''}${r.to ? ' handoff' : ''}">${avatar(r.w, 32)}<div><div class="hd"><button type="button" class="who-btn" data-id="${esc(r.w.id)}">${esc(r.to ? r.from : r.w.name)}</button>${r.to ? `<span>→</span><button type="button" class="who-btn" data-id="${esc(workers.find(x => x.name === r.to)?.id ?? '')}">${esc(r.to)}</button>` : ''}<span>${clock(r.at)}</span></div>${r.err ? `<div class="bd">${esc(r.msg)}</div>` : `<div class="bd md">${md(r.msg)}</div>`}</div></div>`
     : `<div class="cm you"><div><div class="hd"><span>${clock(r.at)}</span><b>${esc(USER_NAME)}</b></div><div class="bd">${esc(r.msg)}</div></div></div>`).join('')
     || '<p class="empty">No messages yet. Start with a name, e.g. @David.</p>');
   setHTML($('#c-status'), workers.filter(w => ['working', 'waiting'].includes(statusOf(w))).map(w => {

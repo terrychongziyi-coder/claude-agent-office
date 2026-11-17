@@ -127,7 +127,7 @@ Workers can hand work to each other when you ask, e.g.:
 - Workers may run `ao-msg` without a permission prompt; other shell commands still follow the worker's permission mode.
 - A handoff to a worker that is waiting on your permission prompt is rejected, and the sender is told why.
 - **Rate:** 10 messages per 60 seconds (enforced locally in `/tmp/ao-msg-rl.json`).
-- **Hops:** the server rejects a message with hop 3 or more. Pass `--hop` when forwarding a message so the guard works across a chain.
+- **Hops:** the server counts handoffs itself and allows 3 per chain, counted from your last message to the sender. A 4th is rejected and the worker is told to report back to you instead, so two workers cannot bounce work back and forth forever. Messaging a worker yourself starts its count again. `--hop` is no longer needed.
 
 ---
 
@@ -146,4 +146,5 @@ tools/
 public/
   index.html   — page markup and styles
   app.js       — Three.js office, command panel, worker editor, backend wiring
+  md.js        — minimal Markdown renderer for Claude's replies (tables, code, lists; escapes all HTML)
 ```

@@ -7,14 +7,13 @@
  *   node /path/to/tools/ao-msg.js <to-worker-name> "<message>" [options]
  *
  * Options:
- *   --hop N          Current hop count (backend rejects at N >= 3). Pass the
- *                    value received from the prefix when forwarding a message.
+ *   --hop N          Optional and not needed inside agent-office: the server counts hops itself.
+ *                    A higher N here only makes the limit hit sooner.
  *   --from <id>      Sending session_id. Not needed inside agent-office: the server sets
  *                    AO_WORKER_ID for each worker, and the recipient sees the sender's name.
  *
  * Rate limit: 10 messages per 60 seconds, enforced via a local timestamp file.
- * Hop guard:  the backend rejects chains with 3 or more hops; set --hop N to
- *             carry the count through a relay chain so the guard activates.
+ * Hop guard:  the server allows 3 handoffs per chain, counted from the user's last message.
  *
  * Config: reads token and port from config.json at CONFIG_PATH or ./config.json.
  */
@@ -115,7 +114,7 @@ try {
 }
 
 if (res.status === 429 || body.error === 'max_hops_exceeded') {
-  console.error('ao-msg: hop limit reached (max 3 hops per chain). Message not sent.');
+  console.error('ao-msg: hop limit reached (max 3 handoffs since the user\'s last message). Message not sent. Report back to the user instead of handing off again.');
   process.exit(2);
 }
 

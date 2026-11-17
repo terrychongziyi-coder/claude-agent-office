@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addressees, directives } from './chat.js';
+import { addressees, directives, fromUser, handoff } from './chat.js';
 import { moveWorker } from './runner.js';
 
 const W = [{ name: 'David' }, { name: 'Amy' }, { name: 'Zi_Yi' }];
@@ -76,4 +76,17 @@ test('reads /effort alongside /model and #project', () => {
   assert.equal(addressees('@David /effort default', W, P).effort, '');
   assert.match(addressees('@David /effort ultra', W, P).error, /Unknown effort ultra. Use one of: default, low, medium, high, xhigh, max/);
   assert.equal(directives('/effort high do it', null).effort, 'high');
+});
+
+test('hop guard ends a handoff loop after MAX_HOPS handoffs', () => {
+  fromUser('D');
+  assert.equal(handoff('D', 'A'), true);   // hop 1
+  assert.equal(handoff('A', 'D'), true);   // hop 2
+  assert.equal(handoff('D', 'A'), true);   // hop 3
+  assert.equal(handoff('A', 'D'), false);  // 4th handoff refused
+  fromUser('A');                           // the user talks to Amy: her chain starts over
+  assert.equal(handoff('A', 'C'), true);
+  fromUser('X');
+  assert.equal(handoff('X', 'Y', 3), false); // a higher legacy --hop still counts
+  assert.equal(handoff(undefined, 'Y'), true); // unknown sender starts at 0
 });
