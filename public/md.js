@@ -1,12 +1,31 @@
 // Minimal Markdown for Claude's replies: tables, code blocks, headings, lists, rules, bold, italic, inline code.
 // Every piece of text is HTML-escaped before markup is added, so a reply can never inject HTML.
-// ponytail: no links, images or nested lists; swap in marked + DOMPurify if replies need them.
+// ponytail: no [text](url) links, images or nested lists; swap in marked + DOMPurify if replies need them.
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// Inline code first, so `**x**` inside backticks stays literal.
-const inline = s => String(s).split(/(`[^`\n]+`)/).map((p, i) => i % 2
-  ? `<code>${esc(p.slice(1, -1))}</code>`
-  : esc(p).replace(/\*\*(?=\S)(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*(?=\S)([^*]+?)\*(?!\w)/g, '$1<i>$2</i>')).join('');
+// Links: http(s) URLs open in a new tab; absolute or ~/ paths become .path links that the app
+// opens through the server (/api/open). ponytail: paths containing spaces are not detected.
+const URL_RE = String.raw`https?:\/\/[^\s<>"'\`]*[^\s<>"'\`.,;:!?)\]]`;
+const ABS_RE = String.raw`(?<![\w/.~:])\/(?:[\w.@+-]+\/)+[\w.@+-]*[\w@+-]`;
+const HOME_RE = String.raw`(?<![\w/.~])~\/(?:[\w.@+-]+\/)*[\w.@+-]*[\w@+-]`;
+const LINK = new RegExp(`(${URL_RE}|${ABS_RE}|${HOME_RE})`, 'g');
+const WHOLE_LINK = new RegExp(`^(?:${URL_RE}|${ABS_RE}|${HOME_RE})$`);
+const link = (target, inner = esc(target)) => /^https?:/.test(target)
+  ? `<a href="${esc(target)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+  : `<a href="#" class="path" data-path="${esc(target)}" title="Open on this Mac">${inner}</a>`;
+
+// Inline code first, so `**x**` inside backticks stays literal. Links are swapped for \0n\0
+// placeholders before escaping and emphasis, then restored.
+const inline = s => String(s).replace(/\0/g, '').split(/(`[^`\n]+`)/).map((p, i) => {
+  if (i % 2) {
+    const code = p.slice(1, -1);
+    return WHOLE_LINK.test(code) ? link(code, `<code>${esc(code)}</code>`) : `<code>${esc(code)}</code>`;
+  }
+  const links = [];
+  const text = p.replace(LINK, m => `\0${links.push(m) - 1}\0`);
+  return esc(text).replace(/\*\*(?=\S)(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*(?=\S)([^*]+?)\*(?!\w)/g, '$1<i>$2</i>')
+    .replace(/\0(\d+)\0/g, (_, n) => link(links[n]));
+}).join('');
 
 const FENCE = /^\s*(```|~~~)/;
 const HEADING = /^(#{1,6})\s+(.*)$/;

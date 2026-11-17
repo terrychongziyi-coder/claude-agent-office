@@ -17,6 +17,8 @@ src/runner.js   one headless `claude -p` process per worker; stream-json in/out;
 src/chat.js     pure logic: message addressing (@names, #project, /model, /effort) and the hop guard
 src/state.js    in-memory sessions (200-entry output ring buffer), workers, projects, WebSocket broadcast
 src/config.js   config.json read/write (token generated on first start)
+src/upload.js   /api/upload storage: uploads/<stamp>-<id>/<sanitised name>, passed to workers via --add-dir
+src/open.js     /api/open policy: documents and folders open, everything else is only revealed in Finder
 public/app.js   whole UI: Three.js office, panels, group chat, worker editor (single file by design)
 public/md.js    escape-first Markdown renderer for Claude's replies
 tools/ao-msg.js worker-to-worker handoff CLI (rate-limited, server hop-guarded)
@@ -39,6 +41,7 @@ tools/ao-msg.js worker-to-worker handoff CLI (rate-limited, server hop-guarded)
 - Anything that becomes a `claude` argument is validated (`validateWorker`, `folderError`, `NAME_RE`, `MODES`, `EFFORTS`, model regex). Spawn without a shell.
 - Reply text reaches the DOM only through `esc()` or `md()`; `md()` escapes before adding markup. Never `innerHTML` raw model output.
 - Worker names are one word and unique case-insensitively (server enforces; the editor mirrors it).
+- `/api/open` never runs a program: only the `DOCS` allowlist and non-bundle folders are opened; everything else gets `open -R`. `execFile`, no shell.
 
 ## Lists that must stay in sync
 
@@ -64,5 +67,6 @@ tools/ao-msg.js worker-to-worker handoff CLI (rate-limited, server hop-guarded)
 - Busy workers are refused (not queued) for moves and settings changes.
 - The ao-msg rate limit (10/min) is one file in `/tmp`, shared by all workers.
 - Teammate list in the identity prompt is fixed at process start.
-- `md.js`: no links, images or nested lists.
+- `md.js`: no `[text](url)` links, images or nested lists; paths with spaces are not linked. `/api/open` is macOS only.
+- `uploads/` is never cleaned up; uploads are copies, so worker edits do not reach the user's original file.
 - Session output is in memory and lost on restart; conversations themselves persist via `claude --resume`.

@@ -6,6 +6,11 @@ import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
 import { loadConfig, saveConfig } from './config.js';
 import { getState, broadcast } from './state.js';
+import { execFile } from 'child_process';
+import { openPlan } from './open.js';
+import { mkdir, writeFile } from 'fs/promises';
+import { dirname as dirOf } from 'path';
+import { uploadPath, MAX_UPLOAD } from './upload.js';
 import { addressees, directives, MODEL_IDS, fromUser, handoff } from './chat.js';
 import { validateWorker, folderError, moveWorker, isBusy, NAME_RE, sendToWorker, interruptWorker, decide, workerChanged, stopWorker, stopAll } from './runner.js';
 
@@ -182,6 +187,25 @@ app.post('/api/chat', async (req, res) => {
   res.json({ ok: true, to: targets.map(w => w.name), warnings });
 });
 
+// File dropped or pasted into a message box. Body is the raw file; ?name= is the original name.
+app.post('/api/upload', express.raw({ type: () => true, limit: MAX_UPLOAD }), async (req, res) => {
+  if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: 'Empty file.' });
+  const path = uploadPath(req.query.name);
+  await mkdir(dirOf(path), { recursive: true });
+  await writeFile(path, req.body, { flag: 'wx' });
+  res.json({ ok: true, path });
+});
+
+// Opens a path from a chat link on this Mac: documents in their default app, anything else revealed in Finder.
+app.post('/api/open', (req, res) => {
+  if (process.platform !== 'darwin') return res.status(501).json({ error: 'Opening files is supported on macOS only.' });
+  const plan = openPlan(req.body?.path);
+  if (plan.error) return res.status(400).json({ error: plan.error });
+  execFile('open', plan.args, err => err
+    ? res.status(500).json({ error: `Could not open: ${err.message}` })
+    : res.json({ ok: true, revealed: plan.revealed }));
+});
+
 app.post('/api/projects', async (req, res) => {
   const { op, project } = req.body ?? {};
   const st = getState();
@@ -241,6 +265,12 @@ app.post('/api/decision', (req, res) => {
     return res.status(404).json({ error: 'no pending request with that id' });
   }
   res.json({ ok: true });
+});
+
+// Body too large (uploads over MAX_UPLOAD, JSON over 2 MB) or malformed: answer in JSON for the UI.
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  res.status(err.status || 500).json({ error: err.type === 'entity.too.large' ? `File too large (max ${MAX_UPLOAD / 1024 / 1024} MB).` : err.message });
 });
 
 const server = createServer(app);

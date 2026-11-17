@@ -90,3 +90,11 @@ test('hop guard ends a handoff loop after MAX_HOPS handoffs', () => {
   assert.equal(handoff('X', 'Y', 3), false); // a higher legacy --hop still counts
   assert.equal(handoff(undefined, 'Y'), true); // unknown sender starts at 0
 });
+
+test('/model accepts the 1M-context, opusplan and best options', () => {
+  assert.equal(addressees('@David /model opus[1m] go', W, P).model, 'claude-opus-5-5[1m]');
+  assert.equal(addressees('@David /model Sonnet[1M]', W, P).model, 'claude-sonnet-5-5[1m]');
+  assert.equal(addressees('@David /model opusplan', W, P).model, 'opusplan');
+  assert.equal(addressees('@David /model best', W, P).model, 'best');
+  assert.equal(addressees('@David /model claude-fable-5-2[1m]', W, P).model, 'claude-fable-5-2[1m]');
+});

@@ -583,11 +583,13 @@ const badge = (s, text) => `<span class="badge s-${s}">${icon(s, 14, 2.2)}${esc(
 const SHIRTS = [['Muted teal', '#6E9E9B'], ['Dusty terracotta', '#C98B6B'], ['Sage', '#9DB08A'], ['Dusty plum', '#A88A9A'], ['Dusty blue', '#8E9BB5'], ['Soft peach', '#E8B79A']];
 const HAIR_STYLES = ['Short', 'Bun', 'Bob', 'Ponytail'];
 const ACCESSORIES = ['None', 'Headphones', 'Glasses', 'Cap', 'Beanie'];
-const MODELS = [['', 'Default (your Claude Code setting)'], ['claude-fable-5-2', 'Fable 5.2'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-5-5', 'Haiku 5.5']];
+const MODELS = [['', 'Default (your Claude Code setting)'], ['claude-fable-5-2', 'Fable 5.2'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-5-5', 'Haiku 5.5'],
+  ['claude-fable-5-2[1m]', 'Fable 5.2 · 1M context'], ['claude-opus-5-5[1m]', 'Opus 5.5 · 1M context'], ['claude-sonnet-5-5[1m]', 'Sonnet 5.5 · 1M context'],
+  ['opusplan', 'Opus plan: Opus plans, Sonnet does the work'], ['best', 'Best: most capable available']];
 const MODES = [['auto', 'Auto: asks only for risky actions'], ['manual', 'Manual: asks before every action'], ['plan', 'Plan: read-only, proposes a plan'], ['acceptEdits', 'Accept edits: edits without asking']];
 const EFFORTS = [['', 'Default (your Claude Code setting)'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
 const effortLabel = e => (EFFORTS.find(([v]) => v === (e || ''))?.[1] ?? e).replace(/ \(.*\)$/, '');
-const modelLabel = m => (MODELS.find(([v]) => v === (m || ''))?.[1] ?? m).replace(/ \(.*\)$/, '');
+const modelLabel = m => (MODELS.find(([v]) => v === (m || ''))?.[1] ?? m).replace(/ \(.*\)$/, '').replace(/:.*$/, '');
 const modeLabel = m => (MODES.find(([v]) => v === (m || 'auto'))?.[1] ?? m).split(':')[0];
 const LOG_CLASS = { Claude: 'c-sum', Read: 'c-read', Grep: 'c-read', Glob: 'c-read', Edit: 'c-edit', Write: 'c-edit', MultiEdit: 'c-edit', NotebookEdit: 'c-edit', Bash: 'c-bash', Result: 'c-ok', Summary: 'c-sum', Fail: 'c-err', Waiting: 'c-bash', You: 'c-you', Approve: 'c-ok', Deny: 'c-err', Info: 'c-read', Msg: 'c-you' };
 const clock = at => new Date(at).toTimeString().slice(0, 8);
@@ -1156,6 +1158,65 @@ $('#ed-save').onclick = async () => {
   renderAll();
   select(worker.id);
 };
+
+// Drop or paste files into a message box: each is uploaded and its saved path inserted at the cursor.
+// Browsers never reveal a dropped file's own location, so the worker reads the uploaded copy.
+function uploadHint(ta, text, err) {
+  const el = ta.id === 'c-in' ? $('#c-hint') : $('#hint');
+  el.textContent = text;
+  el.classList.toggle('err', !!err);
+}
+
+async function attachFiles(ta, files) {
+  if (!files.length || ta.disabled) return;
+  const paths = [];
+  for (const [i, f] of files.entries()) {
+    uploadHint(ta, `Uploading ${f.name || 'file'} (${i + 1}/${files.length})…`);
+    try {
+      // octet-stream, so a dropped .json is stored as bytes, not parsed as a request body
+      const r = await fetch(`/api/upload?token=${encodeURIComponent(TOKEN)}&name=${encodeURIComponent(f.name || 'pasted.png')}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      paths.push(j.path);
+    } catch (e) {
+      uploadHint(ta, `Upload failed for ${f.name || 'file'}: ${e.message}`, true);
+    }
+  }
+  if (!paths.length) return;
+  const at = ta.selectionStart ?? ta.value.length, before = ta.value.slice(0, at), after = ta.value.slice(ta.selectionEnd ?? at);
+  const ins = (before && !/\s$/.test(before) ? ' ' : '') + paths.map(p => `\`${p}\``).join(' ') + (after && !/^\s/.test(after) ? ' ' : '');
+  ta.value = before + ins + after;
+  ta.selectionStart = ta.selectionEnd = (before + ins).length;
+  ta.focus();
+  if (paths.length === files.length) uploadHint(ta, `Attached ${paths.length} file${paths.length > 1 ? 's' : ''}`);
+}
+
+for (const ta of [$('#c-in'), $('#instr')]) {
+  ta.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); ta.classList.add('drop'); } });
+  ta.addEventListener('dragleave', () => ta.classList.remove('drop'));
+  ta.addEventListener('drop', e => {
+    ta.classList.remove('drop');
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    attachFiles(ta, [...e.dataTransfer.files]);
+  });
+  ta.addEventListener('paste', e => {
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (files.length) { e.preventDefault(); attachFiles(ta, files); }
+  });
+}
+
+// File-path links in replies (md.js) open on this Mac through the server.
+document.addEventListener('click', async e => {
+  const a = e.target.closest('a.path');
+  if (!a) return;
+  e.preventDefault();
+  const r = await api('/api/open', { path: a.dataset.path });
+  const msg = !r.ok ? `Open failed: ${r.error}` : r.revealed ? 'Shown in Finder (only documents are opened directly).' : `Opened ${a.dataset.path.split('/').pop() || a.dataset.path}`;
+  if (selectedId) { hintOverride = { text: msg, err: !r.ok }; renderPanel(); }
+  else { $('#c-hint').textContent = msg; $('#c-hint').classList.toggle('err', !r.ok); }
+});
 
 $('#ov-chat').onclick = () => { chatOpen = true; select(null); $('#c-in').focus(); };
 $('#c-close').onclick = () => { chatOpen = false; select(null); };

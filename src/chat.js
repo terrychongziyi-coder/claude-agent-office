@@ -13,7 +13,8 @@ const EFFORT = /^\s*\/effort\s+(\S+)([\s\S]*)$/i;
 // Same list as runner.js EFFORTS; 'default' clears it.
 export const EFFORT_LEVELS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'];
 // Short names for the models offered in the worker editor; '' means the user's Claude Code default.
-export const MODEL_IDS = { default: '', fable: 'claude-fable-5-2', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' };
+export const MODEL_IDS = { default: '', fable: 'claude-fable-5-2', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5',
+  'fable[1m]': 'claude-fable-5-2[1m]', 'opus[1m]': 'claude-opus-5-5[1m]', 'sonnet[1m]': 'claude-sonnet-5-5[1m]', opusplan: 'opusplan', best: 'best' };
 
 // Strips leading "#project", "/model x" and "/effort x" (any order). projects = null: "#" is plain text (worker panel).
 export function directives(rest, projects) {

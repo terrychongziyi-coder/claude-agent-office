@@ -22,3 +22,14 @@ test('code blocks, headings, lists, rules', () => {
   assert.equal(md('a | b without a separator'), '<p>a | b without a separator</p>');
   assert.equal(md('2 * 3 * 4'), '<p>2 * 3 * 4</p>');
 });
+
+test('links URLs and file paths, without letting them inject HTML', () => {
+  const p = '/Users/me/proj/.archify/arch-20261117/knowledge.html';
+  assert.equal(md(`Saved to ${p}.`), `<p>Saved to <a href="#" class="path" data-path="${p}" title="Open on this Mac">${p}</a>.</p>`);
+  assert.equal(md(`\`${p}\``), `<p><a href="#" class="path" data-path="${p}" title="Open on this Mac"><code>${p}</code></a></p>`);
+  assert.equal(md('See https://example.com/a?b=1&c=2, ok'), '<p>See <a href="https://example.com/a?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">https://example.com/a?b=1&amp;c=2</a>, ok</p>');
+  assert.equal(md('**~/notes/plan.md**'), '<p><b><a href="#" class="path" data-path="~/notes/plan.md" title="Open on this Mac">~/notes/plan.md</a></b></p>');
+  assert.equal(md('and/or, /model sonnet, a/b/c'), '<p>and/or, /model sonnet, a/b/c</p>'); // not paths
+  assert.ok(!md('https://x.com/"><script>').includes('<script'));
+  assert.ok(!md('javascript:alert(1)').includes('<a'));
+});

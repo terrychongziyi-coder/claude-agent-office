@@ -1,3 +1,5 @@
+<img src="public/brand/agent-office-logo-horizontal.svg" alt="agent-office" height="48">
+
 # Agent Office
 
 A local-only web app for running and driving several Claude Code sessions from one browser tab.
@@ -40,7 +42,7 @@ Each worker has:
 |---|---|
 | Name, role, outfit, hair, accessory, desk | How it appears in the office (8 desks) |
 | Project folder | Absolute path; Claude works inside it |
-| Model | Default (your Claude Code setting), Fable 5.2, Opus 5.5, Sonnet 5.5 or Haiku 5.5 |
+| Model | Default (your Claude Code setting), Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5, the 1M-context versions of Fable, Opus and Sonnet, Opus plan (Opus plans, Sonnet does the work) or Best |
 | Effort | Default (your Claude Code setting), Low, Medium, High, Extra high or Max (`claude --effort`) |
 | Permission mode | **Auto** (default: asks only for risky actions), Manual (asks before every action), Plan (read-only, proposes a plan), Accept edits (edits without asking). Bypass permissions is not offered. |
 
@@ -70,7 +72,7 @@ David, run the tests
 @David #web /model sonnet build the header     (project, model, then the message)
 ```
 
-`/model` takes `fable`, `opus`, `sonnet`, `haiku`, `default` or a full model id. `/effort` takes `low`, `medium`, `high`, `xhigh`, `max` or `default` (e.g. `@David /effort max`). Both also work at the start of a message in a worker's own panel, are saved like the **Model** and **Effort** fields in Manage workers, and keep the conversation: Claude restarts with the new setting on the next instruction. A busy worker's settings cannot be changed (wait or press **Stop**).
+`/model` takes `fable`, `opus`, `sonnet`, `haiku`, `fable[1m]`, `opus[1m]`, `sonnet[1m]`, `opusplan`, `best`, `default` or a full model id. `/effort` takes `low`, `medium`, `high`, `xhigh`, `max` or `default` (e.g. `@David /effort max`). Both also work at the start of a message in a worker's own panel, are saved like the **Model** and **Effort** fields in Manage workers, and keep the conversation: Claude restarts with the new setting on the next instruction. A busy worker's settings cannot be changed (wait or press **Stop**).
 
 - The message goes word for word to each named worker; nobody else sees it.
 - Each worker is told its own name, role and teammates when Claude starts, so it knows "David" means itself.
@@ -78,6 +80,14 @@ David, run the tests
 - `#project` only counts right after the names, so `#42` later in a message is plain text. An unknown project name is an error, not a silent no-op.
 - If any named worker has no project folder, is waiting for your answer, or is busy and would have to move, nothing is sent.
 - If two busy workers end up in the same folder, the chat warns you; their edits can collide.
+
+### Attaching files
+
+Drag files onto the chat box or a worker's instruction box, or paste them (screenshots included). Each file is uploaded to `agent-office/uploads/<time>-<id>/` and its path is inserted into your message, e.g. `@David review this` followed by the path. Browsers never reveal where a dropped file lives on your Mac, so the worker reads the uploaded copy; changes it makes go to that copy, not your original. Workers can read the uploads folder without a permission prompt (`--add-dir`). Max 25 MB per file. The folder is git-ignored and never cleaned up automatically.
+
+### Links in replies
+
+URLs in Claude's replies open in a new tab. File and folder paths (absolute or `~/…`, also inside backticks) are clickable too: the server opens them with macOS `open`. Documents (html, pdf, images, office files, text, csv, json, …) and folders open directly; anything else, such as scripts, apps or `.command` files, is only revealed in Finder, so a link can never run a program. Paths with spaces are not detected.
 
 ### Projects
 
@@ -146,5 +156,5 @@ tools/
 public/
   index.html   — page markup and styles
   app.js       — Three.js office, command panel, worker editor, backend wiring
-  md.js        — minimal Markdown renderer for Claude's replies (tables, code, lists; escapes all HTML)
+  md.js        — minimal Markdown renderer (also turns URLs and file paths into links) for Claude's replies (tables, code, lists; escapes all HTML)
 ```

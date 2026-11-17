@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agent-office</title>
+<link rel="icon" href="brand/favicon.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="favicon.ico?v=2" sizes="any">
+<link rel="apple-touch-icon" href="brand/apple-touch-icon.png?v=2">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <style>
@@ -46,6 +49,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 /* overview */
 #overview{position:fixed;left:24px;top:24px;width:360px;max-height:calc(100vh - 48px);overflow:auto;padding:20px 16px 16px;display:flex;flex-direction:column;gap:14px;z-index:5}
 .ovh{display:flex;align-items:center;justify-content:space-between;padding:0 4px}
+.logo{display:block;height:28px;width:auto;margin-bottom:6px}
 .kicker{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 h1{margin:0;font-size:22px;font-weight:800}
 #ov-count{font-size:12px;font-weight:700;color:var(--muted)}
@@ -98,7 +102,8 @@ h1{margin:0;font-size:22px;font-weight:800}
 .dots{display:flex;gap:4px;align-items:center}.dots i{width:6px;height:6px;border-radius:9px;background:#7F7366;animation:dot 1.2s infinite}.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
 @keyframes dot{0%,100%{opacity:.25}50%{opacity:1}}
 textarea{width:100%;resize:none;border:1px solid var(--border2);border-radius:12px;background:var(--surface);padding:12px 14px;font-family:var(--ui);font-size:14px;line-height:20px;color:var(--ink)}
-textarea:focus{border-color:var(--primary)}textarea:disabled{background:var(--sunken);color:var(--muted)}
+textarea:focus{border-color:var(--primary)}
+textarea.drop{border:2px dashed var(--primary);background:var(--primary-soft)}textarea:disabled{background:var(--sunken);color:var(--muted)}
 .sendrow{display:flex;align-items:center;justify-content:space-between}#hint{font-size:12px;font-weight:600;color:var(--muted)}
 /* hint chip */
 #hintchip{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:10px 18px;border-radius:999px;background:var(--glass);border:1px solid rgba(227,212,190,.95);box-shadow:0 8px 24px rgba(94,72,48,.12);font-size:13px;font-weight:600;color:var(--muted);z-index:4;white-space:nowrap}
@@ -188,6 +193,7 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
 .md code{font-family:var(--mono);font-size:.92em;padding:1px 5px;border-radius:6px;background:var(--sunken);border:1px solid var(--border)}
 .md pre{padding:10px 12px;border-radius:10px;background:var(--canvas);border:1px solid var(--border);overflow-x:auto;white-space:pre}
 .md pre code{padding:0;border:0;background:none}
+.md a{color:var(--primary);text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere;cursor:pointer}.md a:hover{color:var(--primary-h)}
 .md-table{overflow-x:auto;max-width:100%}
 .md table{border-collapse:collapse;font-size:.95em}
 .md th,.md td{padding:5px 10px;border:1px solid var(--border2);text-align:left;vertical-align:top}
@@ -206,7 +212,7 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
 <div id="stage" aria-label="3D office scene"></div>
 
 <aside id="overview" class="glass" aria-label="Workers overview">
-  <div class="ovh"><div><div class="kicker">agent-office</div><h1>Your office</h1></div><span id="ov-count"></span></div>
+  <div class="ovh"><div><img class="logo" src="brand/agent-office-logo-horizontal.svg" alt="agent-office" width="136" height="28"><h1>Your office</h1></div><span id="ov-count"></span></div>
   <div id="ov-sum"></div>
   <div id="ov-list"></div>
   <button type="button" id="ov-chat" class="btn out"></button>
@@ -232,7 +238,7 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
   <div id="c-log" role="log" aria-label="Group chat messages" aria-live="polite"><div id="c-rows"></div><div id="c-status"></div></div>
   <div style="display:flex;flex-direction:column;gap:8px">
     <label for="c-in" class="lab">Message</label>
-    <textarea id="c-in" rows="3" placeholder="@David fix the login bug    or    David, fix the login bug"></textarea>
+    <textarea id="c-in" rows="3" placeholder="@David fix the login bug    or    David, fix the login bug.  Drop or paste files to attach them."></textarea>
     <div class="sendrow"><span id="c-hint" class="fhint"></span><button type="button" id="c-send" class="btn pri"></button></div>
   </div>
 </section>

@@ -6,6 +6,7 @@ import { isAbsolute } from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { getState, broadcast } from './state.js';
+import { UPLOADS } from './upload.js';
 
 export const MODES = ['auto', 'manual', 'plan', 'acceptEdits'];
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']; // claude --effort; unset = the user's default
@@ -78,6 +79,7 @@ class Runner {
       // Handoffs need no permission prompt; ao-msg is rate-limited and hop-guarded.
       // ponytail: rule breaks if the install path contains spaces; quote-aware rule if that happens
       '--allowedTools', `Bash(node ${AO_MSG} *)`,
+      '--add-dir', UPLOADS, // files dropped into chat
       // snapshot off: identity applies to conversations started before it existed, and to renames
       '--append-system-prompt', identityPrompt(w), '--system-prompt-snapshot', 'off'];
     if (w.model) args.push('--model', w.model);
