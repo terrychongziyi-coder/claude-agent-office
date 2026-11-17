@@ -570,6 +570,7 @@ const ICONS = {
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   sparkle: '<path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/>',
+  chat: '<path d="M4 5.5h16v11H9.5L4 20.5z"/>',
 };
 const icon = (n, s = 16, w = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
@@ -581,7 +582,13 @@ const badge = (s, text) => `<span class="badge s-${s}">${icon(s, 14, 2.2)}${esc(
 const SHIRTS = [['Muted teal', '#6E9E9B'], ['Dusty terracotta', '#C98B6B'], ['Sage', '#9DB08A'], ['Dusty plum', '#A88A9A'], ['Dusty blue', '#8E9BB5'], ['Soft peach', '#E8B79A']];
 const HAIR_STYLES = ['Short', 'Bun', 'Bob', 'Ponytail'];
 const ACCESSORIES = ['None', 'Headphones', 'Glasses', 'Cap', 'Beanie'];
-const LOG_CLASS = { Read: 'c-read', Grep: 'c-read', Glob: 'c-read', Edit: 'c-edit', Write: 'c-edit', MultiEdit: 'c-edit', NotebookEdit: 'c-edit', Bash: 'c-bash', Result: 'c-ok', Summary: 'c-sum', Fail: 'c-err', Waiting: 'c-bash', You: 'c-you', Approve: 'c-ok', Deny: 'c-err', Info: 'c-read' };
+const MODELS = [['', 'Default (your Claude Code setting)'], ['claude-fable-5-2', 'Fable 5.2'], ['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-5-5', 'Haiku 5.5']];
+const MODES = [['auto', 'Auto: asks only for risky actions'], ['manual', 'Manual: asks before every action'], ['plan', 'Plan: read-only, proposes a plan'], ['acceptEdits', 'Accept edits: edits without asking']];
+const EFFORTS = [['', 'Default (your Claude Code setting)'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
+const effortLabel = e => (EFFORTS.find(([v]) => v === (e || ''))?.[1] ?? e).replace(/ \(.*\)$/, '');
+const modelLabel = m => (MODELS.find(([v]) => v === (m || ''))?.[1] ?? m).replace(/ \(.*\)$/, '');
+const modeLabel = m => (MODES.find(([v]) => v === (m || 'auto'))?.[1] ?? m).split(':')[0];
+const LOG_CLASS = { Claude: 'c-sum', Read: 'c-read', Grep: 'c-read', Glob: 'c-read', Edit: 'c-edit', Write: 'c-edit', MultiEdit: 'c-edit', NotebookEdit: 'c-edit', Bash: 'c-bash', Result: 'c-ok', Summary: 'c-sum', Fail: 'c-err', Waiting: 'c-bash', You: 'c-you', Approve: 'c-ok', Deny: 'c-err', Info: 'c-read', Msg: 'c-you' };
 const clock = at => new Date(at).toTimeString().slice(0, 8);
 const shortId = id => String(id ?? '').slice(0, 8);
 const ago = ms => {
@@ -593,9 +600,13 @@ const newId = () => crypto.randomUUID?.() ?? (Date.now().toString(36) + Math.ran
 
 // ── State (from the backend) ────────────────────────────────────────────────
 let workers = [];          // normalised config workers
+let projects = [];         // { name, cwd } from config
 let sessions = {};         // session_id -> snapshot from backend
 const localLog = {};       // session_id -> UI-only entries (instructions sent, decisions)
+const live = {};           // session_id -> Claude text streaming in, not yet a full message
+const FULL_ROWS = new Set(['Summary', 'Claude', 'You', 'Msg']);
 let selectedId = null;
+let chatOpen = true;       // group chat shows in the side slot whenever no worker panel is open
 let connected = false;
 
 function setWorkers(list) {
@@ -626,6 +637,12 @@ const getWorker = id => workers.find(w => w.id === id);
 const statusOf = w => sess(w.session_id)?.status ?? 'idle';
 const dirOf = w => sess(w.session_id)?.cwd || '';
 const roleOf = w => w.role || 'Claude Code session';
+const projectOf = cwd => projects.find(p => p.cwd === cwd);
+// "#billing" for a registered project, otherwise the folder's last segment.
+const projLabel = w => !w.cwd ? 'no folder' : projectOf(w.cwd) ? '#' + projectOf(w.cwd).name : w.cwd.replace(/\/+$/, '').split('/').pop();
+const projChip = w => `<span class="pjt" title="${esc(w.cwd || 'No project folder set')}">${icon('folder', 12)}${esc(projLabel(w))}</span>`;
+// Current conversation first, then the ones parked in other folders.
+const sessionIdsOf = w => [...new Set([w.session_id, ...Object.values(w.sessions ?? {}).map(x => x.session_id)].filter(Boolean))];
 const view = w => ({ ...w, status: statusOf(w) });
 
 function pendingOf(w) {
@@ -634,22 +651,17 @@ function pendingOf(w) {
   const input = p.tool_input ?? {};
   const bash = p.tool_name === 'Bash';
   const body = bash ? (input.command ?? '') : (input.file_path ?? input.path ?? input.url ?? input.pattern ?? JSON.stringify(input, null, 2));
-  return { ...p, bash, body: String(body), at: Date.parse(p.requested_at) || Date.now(), dir: p.cwd || dirOf(w) };
-}
-
-function detected() {
-  const bound = new Set(workers.map(w => w.session_id).filter(Boolean));
-  return Object.values(sessions)
-    .filter(s => !bound.has(s.session_id))
-    .map(s => ({ session: s.session_id, dir: s.cwd || 'unknown directory', started: Date.parse(s.first_seen) || Date.now() }));
+  const questions = p.tool_name === 'AskUserQuestion' && Array.isArray(input.questions) ? input.questions : null;
+  return { ...p, bash, questions, body: String(body), at: Date.parse(p.requested_at) || Date.now(), dir: p.cwd || dirOf(w) };
 }
 
 function inputSummary(tool, raw) {
   if (raw == null) return '';
   let o = null;
   try { o = JSON.parse(raw); } catch { /* summarised input may be truncated JSON */ }
-  const keys = ['command', 'file_path', 'notebook_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt'];
+  const keys = ['question', 'command', 'file_path', 'notebook_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt'];
   if (o && typeof o === 'object') {
+    if (o.questions?.[0]?.question) return o.questions.map(q => q.question).join(' / ');
     for (const k of keys) if (o[k]) return String(o[k]);
     return raw;
   }
@@ -670,7 +682,10 @@ function logRows(w) {
       case 'tool_done': return { at: e.t, tool: 'Result', msg: firstLine(e.output) || `${e.tool_name} finished` };
       case 'tool_fail': return { at: e.t, tool: 'Fail', msg: firstLine(e.output) || `${e.tool_name} failed` };
       case 'summary': return { at: e.t, tool: 'Summary', msg: e.message };
+      case 'text': return { at: e.t, tool: 'Claude', msg: e.message };
       case 'notification': return { at: e.t, tool: 'Info', msg: e.message };
+      case 'you': return { at: e.t, tool: 'You', msg: e.message, sub: 'via group chat' };
+      case 'handoff': return { at: e.t, tool: 'Msg', msg: e.message, sub: `from ${e.from ?? 'another worker'}` };
       default: return { at: e.t, tool: 'Info', msg: e.kind };
     }
   });
@@ -719,7 +734,7 @@ function renderTags() {
     const chip = s === 'waiting' ? '<div class="chip s-waiting">Needs your permission</div>' : s === 'error' ? '<div class="chip s-error">Stopped on an error</div>' : '';
     const fx = s === 'waiting' ? '<span class="pulse"></span><span class="pulse p2"></span>' : s === 'done' ? `<span class="spark">${icon('sparkle', 14, 2.2)}</span>` : '';
     setHTML(st.el, `${chip}<button type="button" class="tag ${w.id === selectedId ? 'sel' : ''}" aria-label="Select ${esc(w.name)}, ${esc(STATUS[s].label)}">
-      <span class="ic s-${s}">${fx}${icon(s, 16, 2.2)}</span><span class="tx"><span class="nm">${esc(w.name)}</span><span class="rl">${esc(roleOf(w))}</span></span></button><span class="stem"></span>`);
+      <span class="ic s-${s}">${fx}${icon(s, 16, 2.2)}</span><span class="tx"><span class="nm">${esc(w.name)}</span><span class="rl">${esc(roleOf(w))}</span>${projChip(w)}</span></button><span class="stem"></span>`);
   }
 }
 
@@ -734,7 +749,7 @@ function renderOverview() {
   $('#ov-sum').innerHTML = sum;
   $('#ov-list').innerHTML = [...workers].sort((a, b) => order[statusOf(a)] - order[statusOf(b)]).map(w => `
     <button type="button" class="row ${w.id === selectedId ? 'sel' : ''} ${statusOf(w) === 'waiting' ? 'wait' : ''}" data-id="${esc(w.id)}" aria-pressed="${w.id === selectedId}">
-      ${avatar(w)}<span class="who"><span class="nm">${esc(w.name)}</span><span class="rl">${esc(roleOf(w))}</span></span>${badge(statusOf(w))}</button>`).join('')
+      ${avatar(w)}<span class="who"><span class="nm">${esc(w.name)}</span><span class="rl">${esc(roleOf(w))}</span>${projChip(w)}</span>${badge(statusOf(w))}</button>`).join('')
     || '<p class="empty">No workers yet. Use Manage workers to add one.</p>';
 }
 
@@ -743,8 +758,11 @@ function renderLog(keepScroll) {
   if (!w) return;
   const el = $('#log');
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  setHTML(el, logRows(w).map(r => `<div class="ln"><span class="t">${clock(r.at)}</span><span class="tool ${LOG_CLASS[r.tool] || ''}">${esc(r.tool)}</span><span class="m${r.tool === 'Summary' || r.tool === 'You' ? ' full' : ''}">${esc(r.msg)}${r.sub ? `<span class="sub">${esc(r.sub)}</span>` : ''}</span></div>`).join('')
-    + (statusOf(w) === 'working' ? '<div class="ln typing"><span class="t"></span><span class="tool c-read">…</span><span class="m dots"><i></i><i></i><i></i></span></div>' : ''));
+  setHTML($('#log-rows'), logRows(w).map(r => `<div class="ln"><span class="t">${clock(r.at)}</span><span class="tool ${LOG_CLASS[r.tool] || ''}">${esc(r.tool)}</span><span class="m${FULL_ROWS.has(r.tool) ? ' full' : ''}">${esc(r.msg)}${r.sub ? `<span class="sub">${esc(r.sub)}</span>` : ''}</span></div>`).join(''));
+  const text = live[w.session_id];
+  $('#log-live').innerHTML = statusOf(w) !== 'working' ? ''
+    : text ? `<div class="ln live"><span class="t">${clock(Date.now())}</span><span class="tool c-sum">Claude</span><span class="m full">${esc(text)}</span></div>`
+      : '<div class="ln live typing"><span class="t"></span><span class="tool c-read">…</span><span class="m dots"><i></i><i></i><i></i></span></div>';
   if (!keepScroll || atBottom) el.scrollTop = el.scrollHeight;
 }
 
@@ -761,38 +779,121 @@ function renderPanel() {
   panel.hidden = false;
   document.body.classList.add('panel-open');
   office.targetOffX = 140;
-  const s = statusOf(w), dir = dirOf(w);
+  const s = statusOf(w);
   $('#p-av').innerHTML = avatar(w, 52);
   $('#p-name').textContent = w.name;
   $('#p-role').textContent = roleOf(w);
   $('#p-badge').innerHTML = badge(s, STATUS[s].label);
-  $('#p-sess').innerHTML = w.session_id
-    ? `<span title="${esc(w.session_id)}">${icon('link', 14)}session ${esc(shortId(w.session_id))}</span><span>${icon('folder', 14)}${esc(dir || 'unknown directory')}</span>`
-    : `<span>${icon('link', 14)}no session bound</span>`;
+  $('#p-sess').innerHTML = w.cwd
+    ? `<span>${icon('folder', 14)}${projectOf(w.cwd) ? `#${esc(projectOf(w.cwd).name)} · ` : ''}${esc(w.cwd)}</span><span>${icon('terminal', 14)}${esc(modelLabel(w.model))} · ${esc(effortLabel(w.effort))} effort</span><span>${icon('waiting', 14)}${esc(modeLabel(w.mode))} mode</span>`
+    : `<span>${icon('folder', 14)}no project folder set</span>`;
 
   const p = pendingOf(w);
-  setHTML($('#perm'), p ? `<div class="perm" role="region" aria-label="Pending permission">
+  setHTML($('#perm'), p?.questions ? questionCard(w, p) : p ? `<div class="perm" role="region" aria-label="Pending permission">
       <div class="perm-h"><span class="ic s-waiting">${icon('waiting', 18, 2.2)}</span><div><div class="pt">${esc(w.name)} ${p.bash ? 'wants to run a shell command' : `wants to use ${esc(p.tool_name)}`}</div><div class="ps">Requested <span id="p-ago">${ago(p.at)}</span> · tool: ${esc(p.tool_name)}</div></div></div>
       <pre>${p.bash ? '<span class="pr">$ </span>' : ''}${esc(p.body)}</pre>
       <div class="pdir">${icon('folder', 14)}<span>${esc(p.dir)}</span></div>
       <div class="pact"><button type="button" class="btn sec" id="deny">Deny</button><button type="button" class="btn pri" id="approve">${icon('done', 18, 2.6)}Approve</button></div></div>`
     : `<div class="noperm">${icon('waiting', 18)}No pending permission requests</div>`, `${w.id}|${p?.request_id ?? ''}`);
   if (p) {
-    $('#approve').onclick = () => decide(w, p, 'allow');
+    $('#approve').onclick = () => p.questions ? answer(w, p) : decide(w, p, 'allow');
     $('#deny').onclick = () => decide(w, p, 'deny');
   }
 
-  const ta = $('#instr'), blocked = !!p || !w.session_id;
+  const runnable = !!w.cwd;
+  const ta = $('#instr'), blocked = !!p || !runnable;
   ta.disabled = blocked;
   $('#send').disabled = blocked;
-  ta.placeholder = p ? 'Respond to the permission request first' : !w.session_id ? 'Bind a session in Manage workers first' : `Add an instruction for ${w.name}`;
+  $('#stop').hidden = !w.cwd || (s !== 'working' && s !== 'waiting');
+  ta.placeholder = p?.questions ? 'Answer the question first' : p ? 'Respond to the permission request first' : !runnable ? 'Set a project folder in Manage workers first' : `Add an instruction for ${w.name}. Start with /model sonnet or /effort high to change settings`;
   const hint = $('#hint');
-  const noPane = w.session_id && !sess(w.session_id)?.pane;
-  const h = p ? { text: 'Paused while waiting for you' }
-    : hintOverride ?? (noPane ? { text: 'No tmux pane bound yet. Start Claude inside tmux.', err: true } : { text: 'Ctrl/Cmd + Enter to send' });
+  const h = p ? { text: 'Paused while waiting for you' } : hintOverride ?? { text: 'Ctrl/Cmd + Enter to send' };
   hint.textContent = h.text;
   hint.classList.toggle('err', !!h.err);
   renderLog(true);
+}
+
+// Claude's AskUserQuestion: native radios/checkboxes per question plus a free-text "Other".
+function questionCard(w, p) {
+  const qs = p.questions.map((q, i) => `<fieldset class="q" data-q="${i}"><legend>${esc(q.question)}</legend>
+      ${(q.options ?? []).map(o => `<label class="opt"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q${i}" value="${esc(o.label)}"><span><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></label>`).join('')}
+      <input type="text" class="other" name="o${i}" placeholder="Other (type your own answer)" aria-label="Other answer"></fieldset>`).join('');
+  return `<div class="perm" role="region" aria-label="Pending question">
+      <div class="perm-h"><span class="ic s-waiting">${icon('waiting', 18, 2.2)}</span><div><div class="pt">${esc(w.name)} has a question for you</div><div class="ps">Asked <span id="p-ago">${ago(p.at)}</span></div></div></div>
+      <div class="qs">${qs}</div>
+      <div class="pact"><button type="button" class="btn sec" id="deny">Dismiss</button><button type="button" class="btn pri" id="approve">${icon('done', 18, 2.6)}Send answer</button></div></div>`;
+}
+
+// Collects { [question text]: answer }; multi-select labels are comma-joined, as Claude Code expects.
+function answer(w, p) {
+  const answers = {};
+  for (const [i, q] of p.questions.entries()) {
+    const box = $(`#perm .q[data-q="${i}"]`);
+    const picked = [...box.querySelectorAll('input:checked')].map(x => x.value);
+    const other = box.querySelector('.other').value.trim();
+    if (other) q.multiSelect ? picked.push(other) : picked.splice(0, picked.length, other);
+    if (!picked.length) {
+      hintOverride = null;
+      $('#hint').textContent = `Pick an answer for: ${q.header || q.question}`;
+      $('#hint').classList.add('err');
+      return;
+    }
+    answers[q.question] = picked.join(', ');
+  }
+  decide(w, p, 'allow', answers);
+}
+
+// Group chat timeline: your messages (once each, even when sent to several workers),
+// workers' replies, and session-level errors. Tool activity stays in each worker's panel.
+function chatRows() {
+  const seen = new Set(), rows = [];
+  for (const w of workers) {
+    for (const e of sessionIdsOf(w).flatMap(id => sess(id)?.output ?? [])) {
+      if (e.kind === 'you') {
+        if (seen.has(e.chat_id)) continue;
+        seen.add(e.chat_id);
+        rows.push({ at: e.t, w: null, msg: e.message });
+      } else if (e.kind === 'text') rows.push({ at: e.t, w, msg: e.message });
+      else if (e.kind === 'tool_fail' && !e.tool_name) rows.push({ at: e.t, w, msg: e.output, err: true });
+      else if (e.kind === 'notification') rows.push({ at: e.t, w, msg: e.message, info: true });
+      else if (e.kind === 'handoff') rows.push({ at: e.t, w: workers.find(x => x.name === e.from) ?? w, msg: e.message, to: e.to, from: e.from ?? 'Someone' });
+    }
+  }
+  return rows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).slice(-300);
+}
+
+function renderChat() {
+  const show = chatOpen && !selectedId;
+  $('#chat').hidden = !show;
+  if (!show) return;
+  document.body.classList.add('panel-open');
+  office.targetOffX = 140;
+  $('#c-who').textContent = !workers.length ? 'Add a worker in Manage workers first'
+    : `Workers: ${workers.map(w => w.name).join(', ')}` + (projects.length ? ` · Projects: ${projects.map(p => '#' + p.name).join(', ')}` : '');
+  const el = $('#c-log'), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  setHTML($('#c-rows'), chatRows().map(r => r.info
+    ? `<div class="cm info">${esc(r.w.name)}: ${esc(r.msg)} · ${clock(r.at)}</div>`
+    : r.w ? `<div class="cm${r.err ? ' err' : ''}${r.to ? ' handoff' : ''}">${avatar(r.w, 32)}<div><div class="hd"><button type="button" class="who-btn" data-id="${esc(r.w.id)}">${esc(r.to ? r.from : r.w.name)}</button>${r.to ? `<span>→</span><button type="button" class="who-btn" data-id="${esc(workers.find(x => x.name === r.to)?.id ?? '')}">${esc(r.to)}</button>` : ''}<span>${clock(r.at)}</span></div><div class="bd">${esc(r.msg)}</div></div></div>`
+    : `<div class="cm you"><div><div class="hd"><span>${clock(r.at)}</span><b>${esc(USER_NAME)}</b></div><div class="bd">${esc(r.msg)}</div></div></div>`).join('')
+    || '<p class="empty">No messages yet. Start with a name, e.g. @David.</p>');
+  setHTML($('#c-status'), workers.filter(w => ['working', 'waiting'].includes(statusOf(w))).map(w => {
+    const s = statusOf(w);
+    return `<button type="button" class="badge s-${s}" data-id="${esc(w.id)}">${icon(s, 14, 2.2)}${esc(w.name)} ${s === 'waiting' ? 'needs you' : 'is working'} in ${esc(projLabel(w))}</button>`;
+  }).join(''));
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+async function sendChat() {
+  const ta = $('#c-in'), text = ta.value.trim(), hint = $('#c-hint');
+  if (!text) return;
+  $('#c-send').disabled = true;
+  const r = await api('/api/chat', { text });
+  $('#c-send').disabled = false;
+  hint.classList.toggle('err', !r.ok);
+  if (!r.ok) { hint.textContent = r.error; return; }
+  ta.value = '';
+  hint.textContent = [`Sent to ${r.to.join(', ')}.`, ...(r.warnings ?? [])].join(' ');
+  hint.classList.toggle('err', !!r.warnings?.length);
 }
 
 function renderAll() {
@@ -800,6 +901,7 @@ function renderAll() {
   renderTags();
   renderOverview();
   renderPanel();
+  renderChat();
   renderHintChip();
   if (editor) renderEditor();
 }
@@ -817,6 +919,7 @@ function select(id) {
   renderTags();
   renderOverview();
   renderPanel();
+  renderChat();
   if (id) renderLog(false);
 }
 
@@ -826,16 +929,17 @@ setInterval(() => {
 }, 1000);
 
 // ── Actions ─────────────────────────────────────────────────────────────────
-async function decide(w, p, behavior) {
+async function decide(w, p, behavior, answers) {
   $('#approve').disabled = $('#deny').disabled = true;
-  const r = await api('/api/decision', { request_id: p.request_id, behavior });
+  const r = await api('/api/decision', { request_id: p.request_id, behavior, answers });
   if (!r.ok) {
     hintOverride = { text: `Decision failed: ${r.error}`, err: true };
     $('#approve').disabled = $('#deny').disabled = false;
     renderPanel();
     return;
   }
-  if (behavior === 'allow') pushLocal(w.session_id, 'Approve', `Approved by ${USER_NAME}`, firstLine(p.body));
+  if (answers) pushLocal(w.session_id, 'You', Object.values(answers).join(' / '));
+  else if (behavior === 'allow') pushLocal(w.session_id, 'Approve', `Approved by ${USER_NAME}`, firstLine(p.body));
   else pushLocal(w.session_id, 'Deny', `Denied by ${USER_NAME}`);
   renderPanel();
 }
@@ -845,18 +949,16 @@ let histIdx = -1, histDraft = '';
 
 async function sendInstruction() {
   const w = getWorker(selectedId), ta = $('#instr'), text = ta.value.trim();
-  if (!w || !text || !w.session_id || pendingOf(w)) return;
+  if (!w || !text || !w.cwd || pendingOf(w)) return;
   if (history[history.length - 1] !== text) { history.push(text); if (history.length > 100) history.shift(); }
   histIdx = -1;
   ta.value = '';
   pushLocal(w.session_id, 'You', text);
   hintOverride = null;
   renderPanel();
-  const r = await api('/api/send', { session_id: w.session_id, text });
+  const r = await api('/api/send', { worker_id: w.id, text });
   if (!r.ok) {
-    const msg = r.error === 'pane_gone' ? 'The tmux pane is gone. Restart Claude in tmux.'
-      : /no pane bound/.test(r.error) ? 'No tmux pane bound. Start Claude Code inside tmux.'
-        : `Send failed: ${r.error}`;
+    const msg = `Send failed: ${r.error}`;
     pushLocal(w.session_id, 'Fail', msg);
     hintOverride = { text: msg, err: true };
   }
@@ -866,6 +968,14 @@ async function sendInstruction() {
 $('#ov-list').addEventListener('click', e => { const r = e.target.closest('.row'); if (r) select(r.dataset.id); });
 $('#p-close').onclick = () => select(null);
 $('#send').onclick = sendInstruction;
+$('#stop').onclick = async () => {
+  const w = getWorker(selectedId);
+  if (!w) return;
+  $('#stop').disabled = true;
+  const r = await api('/api/interrupt', { worker_id: w.id });
+  $('#stop').disabled = false;
+  if (!r.ok) { hintOverride = { text: `Stop failed: ${r.error}`, err: true }; renderPanel(); }
+};
 $('#instr').addEventListener('keydown', e => {
   const ta = e.target;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendInstruction(); return; }
@@ -889,14 +999,14 @@ const freeSlots = exceptId => {
   return SLOTS.map((_, i) => i).filter(i => !taken.has(i));
 };
 
-function blankDraft(sessionId = '') {
-  return { name: '', role: '', shirt: SHIRTS[workers.length % 6][1], hair: 'Short', acc: 'None', slot: freeSlots(null)[0], session_id: sessionId };
+function blankDraft() {
+  return { name: '', role: '', shirt: SHIRTS[workers.length % 6][1], hair: 'Short', acc: 'None', slot: freeSlots(null)[0], cwd: '', model: '', effort: '', mode: 'auto' };
 }
 
 function openEditor(id) {
   const w = id ? getWorker(id) : null;
   editor = w
-    ? { id, draft: { name: w.name, role: w.role, shirt: w.shirt, hair: w.hair, acc: w.acc, slot: w.slot, session_id: w.session_id || '' } }
+    ? { id, draft: { name: w.name, role: w.role, shirt: w.shirt, hair: w.hair, acc: w.acc, slot: w.slot, cwd: w.cwd || '', model: w.model || '', effort: w.effort || '', mode: w.mode || 'auto' } }
     : { id: null, draft: blankDraft() };
   editor.confirmRemove = false;
   editor.error = '';
@@ -904,20 +1014,19 @@ function openEditor(id) {
   renderEditor();
 }
 
-function newFromSession(sessionId) {
-  if (!freeSlots(null).length) return;
-  editor = { id: null, draft: blankDraft(sessionId), confirmRemove: false, error: '' };
-  $('#editor').hidden = false;
-  renderEditor();
-  setTimeout(() => $('#f-name')?.focus(), 0);
-}
-
 function closeEditor() { $('#editor').hidden = true; editor = null; }
 
-function sessionChoices() {
-  const w = editor.id ? getWorker(editor.id) : null, list = [];
-  if (w?.session_id) list.push({ session: w.session_id, dir: dirOf(w) || 'unknown directory' });
-  return list.concat(detected());
+function sessionInfo(editing) {
+  const d = editor.draft;
+  const runs = `<div class="sess"><div class="sh"><span class="sic">${icon('terminal', 16)}</span><div class="mono"><div class="sid">claude · ${esc(modelLabel(d.model))} · ${esc(effortLabel(d.effort))} effort</div><div class="sdir">${esc(d.cwd || 'no folder yet')}</div></div></div>
+      <p>${esc(modeLabel(d.mode))} mode. agent-office starts Claude in this folder when you send the first instruction.</p></div>`;
+  if (!editing?.cwd) {
+    return runs + (editing ? `<p class="empty">${esc(editing.name)} has no project folder yet. Set one to run it; it starts a new conversation.</p>` : '');
+  }
+  const s = sess(editing.session_id);
+  return runs + `<div class="sess"><div class="sh"><span class="sic">${icon('link', 16)}</span><div class="mono"><div class="sid" title="${esc(editing.session_id)}">conversation ${esc(shortId(editing.session_id))}</div><div class="sdir">${editing.resumable ? 'resumes after restarts' : 'starts on first instruction'}</div></div></div>
+      <div class="sst">${icon(statusOf(editing), 14)}${esc(STATUS[statusOf(editing)].label)}${s?.output?.length ? ` · ${s.output.length} log entries` : ''}</div>
+      <p>Changing the model, effort, mode, name or role restarts Claude and keeps the conversation. Each folder has its own conversation; moving back to a folder resumes it.</p></div>`;
 }
 
 function plan() {
@@ -941,8 +1050,6 @@ function renderEditor() {
   $('#ed-list').innerHTML = workers.map(w => `<button type="button" class="row ${w.id === editor.id ? 'sel' : ''}" data-id="${esc(w.id)}" aria-pressed="${w.id === editor.id}">${avatar(w)}<span class="who"><span class="nm">${esc(w.name)}</span><span class="rl">${esc(roleOf(w))}</span></span>${icon('edit', 16)}</button>`).join('');
   $('#ed-add').disabled = full;
   $('#ed-add').title = full ? 'All desks are taken' : '';
-  const choices = sessionChoices();
-  if (!d.session_id && choices.length) d.session_id = choices[0].session;
   const focused = document.activeElement?.id;
   $('#ed-form').innerHTML = `
     <div class="fh">${avatar({ shirt: d.shirt, name: d.name || '+' }, 48)}<div><div class="ft">${editing ? 'Edit ' + esc(editing.name) : 'New worker'}</div><div class="fs">Changes apply to the office when you save.</div></div></div>
@@ -951,24 +1058,37 @@ function renderEditor() {
     <div class="frow2"><div><div class="lbl">Hair</div><div class="chips" data-k="hair">${HAIR_STYLES.map(s => `<button type="button" class="chipb ${d.hair === s ? 'on' : ''}" aria-pressed="${d.hair === s}" data-v="${s}">${s}</button>`).join('')}</div></div>
     <div><div class="lbl">Accessory</div><div class="chips" data-k="acc">${ACCESSORIES.map(s => `<button type="button" class="chipb ${d.acc === s ? 'on' : ''}" aria-pressed="${d.acc === s}" data-v="${s}">${s}</button>`).join('')}</div></div></div>
     <div><div class="lbl">Desk position <span class="lbls">Pick a free slot</span></div><div class="plan">${plan()}</div></div>
-    <label class="fld">Bound session<select id="f-sess">${choices.length ? '' : '<option value="">No sessions available</option>'}${choices.map(s => `<option value="${esc(s.session)}" ${s.session === d.session_id ? 'selected' : ''}>session ${esc(shortId(s.session))} · ${esc(s.dir)}</option>`).join('')}</select></label>
+    <label class="fld">Project folder<input id="f-cwd" class="mono" type="text" list="pj-paths" spellcheck="false" autocomplete="off" placeholder="/Users/you/projects/my-app" value="${esc(d.cwd)}"><span class="fhint">Absolute path. Claude works inside this folder.</span></label>
+    <div class="frow"><label class="fld">Model<select id="f-model">${MODELS.map(([v, l]) => `<option value="${v}" ${v === (d.model || '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+    <label class="fld">Effort<select id="f-effort">${EFFORTS.map(([v, l]) => `<option value="${v}" ${v === (d.effort || '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+    <label class="fld">Permission mode<select id="f-mode">${MODES.map(([v, l]) => `<option value="${v}" ${v === d.mode ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label></div>
     ${editor.error ? `<p class="ferr" role="alert">${esc(editor.error)}</p>` : ''}`;
-  if (focused === 'f-name' || focused === 'f-role') {
+  if (focused === 'f-name' || focused === 'f-role' || focused === 'f-cwd') {
     const el = $('#' + focused);
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
   }
-  const det = detected();
-  $('#ed-detected').innerHTML = det.length ? det.map(s => `<div class="sess"><div class="sh"><span class="sic">${icon('terminal', 16)}</span><div class="mono"><div class="sid" title="${esc(s.session)}">session ${esc(shortId(s.session))}</div><div class="sdir">${esc(s.dir)}</div></div></div>
-      <div class="sst">${icon('clock', 14)}Started ${ago(s.started)}</div>
-      <div class="sbtn"><button type="button" class="btn pri sm" data-new="${esc(s.session)}" ${full ? 'disabled' : ''}>${icon('plus', 16, 2.4)}New worker</button>${editing ? `<button type="button" class="btn sec sm" data-assign="${esc(s.session)}">Assign to ${esc(editing.name)}</button>` : ''}</div></div>`).join('')
-    : '<p class="empty">All running sessions have a desk.</p>';
-  $('#ed-detected-n').textContent = det.length;
+  $('#ed-info').innerHTML = sessionInfo(editing);
   const rm = $('#ed-remove');
   rm.hidden = !editing;
   if (editing) rm.innerHTML = icon('trash', 18) + (editor.confirmRemove ? `Confirm remove ${esc(editing.name)}` : `Remove ${esc(editing.name)}`);
   rm.classList.toggle('confirm', !!editor.confirmRemove);
   $('#ed-save').textContent = editing ? 'Save changes' : 'Add worker';
+  renderProjects();
+}
+
+function renderProjects() {
+  setHTML($('#pj-list'), projects.map(p => `<div class="pj"><span class="who" data-pj="${esc(p.name)}" title="Edit"><span class="nm">#${esc(p.name)}</span><span class="rl">${esc(p.cwd)}</span></span>
+    <button type="button" class="iconbtn" data-del="${esc(p.name)}" aria-label="Remove project ${esc(p.name)}">${icon('trash', 16)}</button></div>`).join('')
+    || '<p class="empty">No projects yet.</p>');
+  $('#pj-paths').innerHTML = projects.map(p => `<option value="${esc(p.cwd)}">#${esc(p.name)}</option>`).join('');
+}
+
+async function projectOp(op, project) {
+  const r = await api('/api/projects', { op, project });
+  $('#pj-err').hidden = r.ok;
+  $('#pj-err').textContent = r.ok ? '' : r.error;
+  if (r.ok && op === 'upsert') $('#pj-name').value = $('#pj-cwd').value = '';
 }
 
 $('#ov-manage').onclick = () => openEditor(selectedId || workers[0]?.id || null);
@@ -980,20 +1100,24 @@ $('#ed-form').addEventListener('input', e => {
   if (t.id === 'f-name') d.name = t.value;
   else if (t.id === 'f-role') d.role = t.value;
   else if (t.name === 'shirt') { d.shirt = t.value; renderEditor(); }
-  else if (t.id === 'f-sess') d.session_id = t.value;
+  else if (t.id === 'f-cwd') { d.cwd = t.value; $('#ed-info').innerHTML = sessionInfo(editor.id ? getWorker(editor.id) : null); }
 });
-$('#ed-form').addEventListener('change', e => { if (e.target.id === 'f-sess') editor.draft.session_id = e.target.value; });
+$('#ed-form').addEventListener('change', e => {
+  const k = { 'f-model': 'model', 'f-effort': 'effort', 'f-mode': 'mode' }[e.target.id];
+  if (k) { editor.draft[k] = e.target.value; $('#ed-info').innerHTML = sessionInfo(editor.id ? getWorker(editor.id) : null); }
+});
 $('#ed-form').addEventListener('click', e => {
   const chip = e.target.closest('.chipb');
   if (chip) { editor.draft[chip.parentElement.dataset.k] = chip.dataset.v; renderEditor(); return; }
   const slot = e.target.closest('.slot[data-slot]');
   if (slot) { editor.draft.slot = +slot.dataset.slot; renderEditor(); }
 });
-$('#ed-detected').addEventListener('click', e => {
-  const n = e.target.closest('[data-new]');
-  if (n) { newFromSession(n.dataset.new); return; }
-  const a = e.target.closest('[data-assign]');
-  if (a && editor.id) { editor.draft.session_id = a.dataset.assign; renderEditor(); }
+$('#pj-save').onclick = () => projectOp('upsert', { name: $('#pj-name').value, cwd: $('#pj-cwd').value });
+$('#pj-list').addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if (del) { projectOp('delete', { name: del.dataset.del }); return; }
+  const p = projects.find(x => x.name === e.target.closest('[data-pj]')?.dataset.pj);
+  if (p) { $('#pj-name').value = p.name; $('#pj-cwd').value = p.cwd; }
 });
 $('#ed-remove').onclick = async () => {
   if (!editor?.id) return;
@@ -1011,28 +1135,40 @@ $('#ed-save').onclick = async () => {
   d.name = d.name.trim();
   d.role = d.role.trim();
   if (!d.name || !d.role) { editor.error = 'Name and role are required.'; renderEditor(); return; }
+  if (!/^[\p{L}\p{N}_-]{1,20}$/u.test(d.name)) { editor.error = 'Name must be one word (letters, digits, _ or -), so you can address it in chat.'; renderEditor(); return; }
   if (workers.some(w => w.id !== editor.id && w.name.toLowerCase() === d.name.toLowerCase())) { editor.error = `A worker named ${d.name} already exists.`; renderEditor(); return; }
-  if (!d.session_id) { editor.error = 'Bind a session first. Start a coding session, then it appears under Detected.'; renderEditor(); return; }
+  d.cwd = d.cwd.trim();
+  if (!d.cwd.startsWith('/')) { editor.error = 'Enter the project folder as an absolute path, starting with /.'; renderEditor(); return; }
   if (d.slot == null) { editor.error = 'Pick a free desk slot.'; renderEditor(); return; }
   const existing = editor.id ? getWorker(editor.id) : null;
   const h = hash(editor.id ?? d.name);
+  const { pane, session_id, resumable, resume_id, sessions: _s, color, ...keep } = existing ?? { skin: SKINS[h % 4], hairColor: HAIR_COLORS[h % 5] };
   const worker = {
-    ...(existing ?? { skin: SKINS[h % 4], hairColor: HAIR_COLORS[h % 5] }),
+    ...keep,
     id: editor.id ?? newId(),
-    name: d.name, role: d.role, shirt: d.shirt, color: d.shirt, hair: d.hair, acc: d.acc, slot: d.slot, session_id: d.session_id,
+    name: d.name, role: d.role, shirt: d.shirt, hair: d.hair, acc: d.acc, slot: d.slot, cwd: d.cwd, model: d.model, effort: d.effort, mode: d.mode,
   };
   const r = await api('/api/workers', { op: 'upsert', worker });
   if (!r.ok) { editor.error = `Save failed: ${r.error}`; renderEditor(); return; }
-  setWorkers(workers.filter(w => w.id !== worker.id).concat(worker));
+  setWorkers(workers.filter(w => w.id !== worker.id).concat(r.worker ?? worker));
   closeEditor();
   renderAll();
   select(worker.id);
 };
 
+$('#ov-chat').onclick = () => { chatOpen = true; select(null); $('#c-in').focus(); };
+$('#c-close').onclick = () => { chatOpen = false; select(null); };
+$('#c-send').onclick = sendChat;
+$('#c-log').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) select(b.dataset.id); });
+$('#c-in').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
+});
+
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!$('#editor').hidden) closeEditor();
   else if (selectedId) select(null);
+  else if (chatOpen) $('#c-close').click();
 });
 
 // ── Backend connection ──────────────────────────────────────────────────────
@@ -1042,10 +1178,15 @@ function handle(msg) {
       sessions = {};
       for (const s of msg.sessions ?? []) sessions[s.session_id] = s;
       setWorkers(msg.workers);
+      projects = msg.projects ?? [];
+      break;
+    case 'projects_updated':
+      projects = msg.projects ?? [];
       break;
     case 'status': {
       const s = ensureSession(msg.session_id);
       s.status = msg.status;
+      if (msg.status !== 'working') live[msg.session_id] = '';
       if (msg.cwd) s.cwd = msg.cwd;
       break;
     }
@@ -1053,13 +1194,14 @@ function handle(msg) {
       const s = ensureSession(msg.session_id);
       (s.output ??= []).push(msg.entry);
       if (s.output.length > 200) s.output.shift();
+      if (msg.entry.kind === 'text' || msg.entry.kind === 'tool_start') live[msg.session_id] = '';
       break;
     }
-    case 'pane_registered': {
-      const s = ensureSession(msg.session_id);
-      s.pane = msg.pane;
-      if (msg.cwd) s.cwd = msg.cwd;
-      break;
+    case 'delta': {
+      live[msg.session_id] = (live[msg.session_id] ?? '') + msg.text;
+      const w = getWorker(selectedId);
+      if (w?.session_id === msg.session_id) renderLog(true);
+      return;
     }
     case 'workers_updated':
       setWorkers(msg.workers);
@@ -1091,6 +1233,10 @@ function connect() {
 }
 
 $('#ov-manage').innerHTML = icon('manage', 18) + 'Manage workers';
+$('#ov-chat').innerHTML = icon('chat', 18) + 'Group chat';
+$('#c-close').innerHTML = icon('close', 20);
+$('#c-send').innerHTML = 'Send' + icon('send', 18, 2.4);
+$('#c-hint').textContent = 'Enter to send · Shift+Enter: new line · @David /model sonnet /effort high: change settings';
 $('#p-close').innerHTML = icon('close', 20);
 $('#ed-close').innerHTML = icon('close', 20);
 $('#ed-add').innerHTML = icon('plus', 18) + 'Add worker';

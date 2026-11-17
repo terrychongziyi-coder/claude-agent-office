@@ -9,7 +9,8 @@
  * Options:
  *   --hop N          Current hop count (backend rejects at N >= 3). Pass the
  *                    value received from the prefix when forwarding a message.
- *   --from <id>      Sending session_id (shows as prefix in the target pane).
+ *   --from <id>      Sending session_id. Not needed inside agent-office: the server sets
+ *                    AO_WORKER_ID for each worker, and the recipient sees the sender's name.
  *
  * Rate limit: 10 messages per 60 seconds, enforced via a local timestamp file.
  * Hop guard:  the backend rejects chains with 3 or more hops; set --hop N to
@@ -103,6 +104,7 @@ try {
       text,
       hop,
       from_session_id: fromId,
+      from_worker_id:  process.env.AO_WORKER_ID,
     }),
     signal: AbortSignal.timeout(10_000),
   });

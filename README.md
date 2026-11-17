@@ -1,15 +1,16 @@
 # Agent Office
 
-A local-only web dashboard for monitoring and driving Claude Code sessions.
-Each session appears as a worker you can inspect, talk to, and approve permissions for — all from one browser tab.
+A local-only web app for running and driving several Claude Code sessions from one browser tab.
+Each worker in the 3D office is a Claude Code session working in a project folder. You send it instructions, read its output as it streams, and answer its permission prompts and questions.
+
+agent-office starts each session itself with the `claude` CLI in headless mode (`claude -p` with stream-json input and output). The sessions use your normal Claude Code login and settings. agent-office never reads your credentials and does not call the Anthropic API.
 
 ---
 
 ## Requirements
 
 - **Node.js 20+**
-- **tmux** — needed to send instructions from the UI (status, output and approvals work without it)
-- **curl** — used by the pane-registration hook
+- **Claude Code CLI** (`claude`) installed and logged in
 
 ---
 
@@ -20,135 +21,113 @@ npm install
 npm start
 ```
 
-On first boot the server generates a random token and prints:
+The server prints the UI address, with a random token generated on first start and kept in `config.json`:
 
 ```
 agent-office started
-  UI:       http://127.0.0.1:4000/?token=<TOKEN>
-  Hook URL: http://127.0.0.1:4000/hook?token=<TOKEN>
-  Token:    <TOKEN>
+  UI: http://127.0.0.1:4000/?token=<TOKEN>
 ```
 
-Open the UI URL in your browser.
+Open it, click **Manage workers**, add a worker with a project folder, then select it and send an instruction.
 
 ---
 
-## Hook setup (one-time)
+## Workers
 
-The server prints the exact JSON block to add to your Claude Code settings on every startup. Add it to either:
+Each worker has:
 
-- **Global**: `~/.claude/settings.json`
-- **Project**: `.claude/settings.local.json`
+| Field | Meaning |
+|---|---|
+| Name, role, outfit, hair, accessory, desk | How it appears in the office (8 desks) |
+| Project folder | Absolute path; Claude works inside it |
+| Model | Default (your Claude Code setting), Fable 5.2, Opus 5.5, Sonnet 5.5 or Haiku 5.5 |
+| Effort | Default (your Claude Code setting), Low, Medium, High, Extra high or Max (`claude --effort`) |
+| Permission mode | **Auto** (default: asks only for risky actions), Manual (asks before every action), Plan (read-only, proposes a plan), Accept edits (edits without asking). Bypass permissions is not offered. |
 
-The snippet looks like this (token and paths will differ):
+- Claude starts in the worker's folder when you send its first instruction, and keeps running between instructions.
+- Each worker has one conversation per folder. Moving a worker to another folder (in Manage workers or with `#project` in chat) parks the current conversation; moving back resumes it. After a server restart, the next instruction resumes the folder's conversation (`claude --resume`).
+- Changing the model, mode, name or role restarts Claude on the next instruction and keeps the conversation.
+- A busy worker cannot be moved to another folder; wait or press **Stop** first.
+- **Stop** interrupts the current task. Removing a worker stops its Claude process.
+- Permission prompts and Claude's questions appear in the panel. Nothing is approved automatically by agent-office; in Auto mode, Claude Code itself decides which actions are safe enough to run without asking.
 
-```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "hooks": [{ "type": "command", "command": "/path/to/agent-office/hooks/register-pane.sh" }]
-    }],
-    "PreToolUse":        [{ "matcher": "*", "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }],
-    "PostToolUse":       [{ "matcher": "*", "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }],
-    "PostToolUseFailure":[{ "matcher": "*", "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 120000 }] }],
-    "Notification":      [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }],
-    "Stop":              [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }],
-    "StopFailure":       [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }],
-    "SessionEnd":        [{ "hooks": [{ "type": "http", "url": "http://127.0.0.1:4000/hook?token=TOKEN", "timeout": 10000 }] }]
-  },
-  "allowedHttpHookUrls": ["http://127.0.0.1:4000"]
-}
-```
-
-**Copy the snippet from the server's terminal output** — it already has the correct token and path.
-
-Or let the installer merge it for you (preview first, then apply; it backs up the file):
-
-```sh
-npm run hooks                                   # preview, token hidden
-npm run hooks -- --apply                        # writes ~/.claude/settings.json
-npm run hooks -- --apply --settings /path/to/project/.claude/settings.local.json
-```
-
-The token is generated once and stored in `config.json`. Restarting the server reuses the same token, so hook configuration only needs to be done once.
+Workers are stored in `config.json`. Session output is kept in memory (last 200 entries per worker) and is cleared when the server restarts.
 
 ---
 
-## Starting a monitored session
+## Group chat
 
-```sh
-tmux new-session -s work
-claude                # starts Claude Code inside the tmux pane
+The **Group chat** panel shows one timeline: your messages, every worker's replies, and session errors. Tool activity and permission prompts stay in each worker's own panel; click a name or a "needs you" badge to open it.
+
+Start a message with who it is for:
+
+```
+@David fix the login bug
+@David @Amy pair on the checkout flow
+David, run the tests
+@David #billing-api fix the invoice total      (moves David to the billing-api project first)
+@David @Amy /model haiku                       (switches model; no message needed)
+@David #web /model sonnet build the header     (project, model, then the message)
 ```
 
-The `register-pane.sh` hook fires on `SessionStart`, reads `$TMUX_PANE`, and registers it with the backend. The session appears in the dashboard within seconds.
+`/model` takes `fable`, `opus`, `sonnet`, `haiku`, `default` or a full model id. `/effort` takes `low`, `medium`, `high`, `xhigh`, `max` or `default` (e.g. `@David /effort max`). Both also work at the start of a message in a worker's own panel, are saved like the **Model** and **Effort** fields in Manage workers, and keep the conversation: Claude restarts with the new setting on the next instruction. A busy worker's settings cannot be changed (wait or press **Stop**).
+
+- The message goes word for word to each named worker; nobody else sees it.
+- Each worker is told its own name, role and teammates when Claude starts, so it knows "David" means itself.
+- Names are one word (letters, digits, `_`, `-`) and unique, ignoring case.
+- `#project` only counts right after the names, so `#42` later in a message is plain text. An unknown project name is an error, not a silent no-op.
+- If any named worker has no project folder, is waiting for your answer, or is busy and would have to move, nothing is sent.
+- If two busy workers end up in the same folder, the chat warns you; their edits can collide.
+
+### Projects
+
+Add projects (a one-word name and an absolute folder) under **Manage workers → Projects**. They are stored in `config.json` and also show up as suggestions in a worker's folder field.
+
+---
+
+## Upgrading from the tmux version
+
+Earlier versions read sessions through Claude Code hooks and typed into tmux. Neither is needed now. If you added the hooks to a settings file, remove them (preview first; `--apply` writes a backup before changing the file):
+
+```sh
+npm run unhook                    # preview for ~/.claude/settings.json
+npm run unhook -- --apply
+npm run unhook -- --apply --settings /path/to/project/.claude/settings.local.json
+```
+
+Only agent-office entries are removed; other hooks and settings are kept. Old workers without a project folder stay in the list; edit them and set a folder to use them again.
 
 ---
 
 ## Security model
 
-The dashboard accepts two auth checks on every request:
-
-| Check | Where applied |
-|-------|--------------|
-| **Token** (`?token=` or `x-ao-token` header) | All endpoints |
-| **Origin header** | Browser-facing endpoints (`/api/*`, `/ws`) |
-
-The `/hook` endpoint skips the Origin check because HTTP hooks from Claude Code are not browser requests. Both checks are required for the browser endpoints because **any web page can reach `localhost`**, and the send endpoint types directly into your terminals.
-
-The server binds to `127.0.0.1:4000` only, so the port is unreachable from other machines. Set `PORT` to use a different port.
-
----
-
-## Worker editor
-
-Click **⚙ Workers** in the sidebar to open the worker editor:
-
-- **Add worker** — name, role, outfit colour, hair, accessory, desk slot, and bound session.
-- **Edit** — change any of the above, or assign a detected session.
-- **Remove** — removes the worker definition (does not stop the session).
-
-Workers are stored in `config.json`. The office has 8 desks; each worker picks one in the editor's top-down plan.
+- The server binds to `127.0.0.1` only. Set `PORT` to use a port other than 4000.
+- Every `/api` route and the WebSocket require the token (`?token=` or the `x-ao-token` header).
+- Browser requests must also come from the app's own origin. Any web page can reach `localhost`, and these routes run commands through Claude, so a request from another origin is rejected.
+- Worker settings become `claude` arguments, so the server validates them: the folder must be an existing absolute directory, the mode must be one of the four listed, and the model name cannot look like a flag. Processes are started without a shell.
 
 ---
 
 ## Inter-agent messaging (`ao-msg`)
 
-Workers can send each other instructions without leaving Claude Code:
+A worker can send another worker an instruction:
 
 ```sh
-node /path/to/agent-office/tools/ao-msg.js <worker-name> "<message>"
+node /path/to/agent-office/tools/ao-msg.js <worker-name> "<message>" [--hop N] [--from <session-id>]
 ```
 
-Example — from inside a Claude Code session, tell "Bob" to review a file:
+Workers can hand work to each other when you ask, e.g.:
 
-```sh
-node ~/agent-office/tools/ao-msg.js Bob "please review src/auth.js for security issues"
+```
+@David add pagination to /orders. When you're done, message Amy with exactly what the frontend must change.
 ```
 
-**Options**
-
-| Flag | Description |
-|------|-------------|
-| `--hop N` | Current hop depth (backend rejects at N ≥ 3; include when forwarding a received message) |
-| `--from <session-id>` | Sends as a prefixed label in the target pane |
-
-**Limits**
-
-- **Rate**: 10 messages per 60 seconds (enforced locally in `/tmp/ao-msg-rl.json`).
-- **Hops**: max 3 per chain (enforced by the backend). A message that arrives with hop=2 may not be forwarded again.
-
----
-
-## Config file
-
-`config.json` is created automatically. It stores:
-
-- `token` — the per-installation auth token
-- `workers` — worker definitions (name, colour, assigned session)
-
-This file is git-ignored. Do not commit it.
+- The recipient sees `[Message from David (Backend), your teammate in agent-office]` before the text. The server sets `AO_WORKER_ID` for each worker, so `--from` is not needed.
+- The handoff shows in the group chat as **David → Amy** and in the recipient's panel.
+- Workers may run `ao-msg` without a permission prompt; other shell commands still follow the worker's permission mode.
+- A handoff to a worker that is waiting on your permission prompt is rejected, and the sender is told why.
+- **Rate:** 10 messages per 60 seconds (enforced locally in `/tmp/ao-msg-rl.json`).
+- **Hops:** the server rejects a message with hop 3 or more. Pass `--hop` when forwarding a message so the guard works across a chain.
 
 ---
 
@@ -157,25 +136,14 @@ This file is git-ignored. Do not commit it.
 ```
 src/
   server.js    — Express + WebSocket server, all routes
+  runner.js    — starts and drives one headless Claude process per worker
+  chat.js      — works out which workers a group-chat message is for (tests: npm test)
+  state.js     — in-memory session state, output ring buffer, WebSocket broadcast
   config.js    — config.json read/write, token generation
-  state.js     — in-memory session state, ring buffer, WS broadcast
-  hooks.js     — Claude Code hook event handler
-  tmux.js      — tmux send-keys wrapper
-hooks/
-  register-pane.sh  — SessionStart shell hook (reads $TMUX_PANE)
 tools/
-  install-hooks.js — merges the hook config into a Claude settings file
-  ao-msg.js    — inter-agent message CLI (rate-limited, hop-guarded)
+  ao-msg.js        — inter-agent message CLI (rate-limited, hop-guarded)
+  remove-hooks.js  — removes hooks left by the tmux version from a settings file
 public/
   index.html   — page markup and styles
-  app.js       — Three.js 3D office, command panel, worker editor, backend wiring
+  app.js       — Three.js office, command panel, worker editor, backend wiring
 ```
-
----
-
-## Milestones
-
-- **M1 ✓** — Backend, hook wiring, minimal status dashboard
-- **M2 ✓** — Three.js low-poly office scene, worker avatars, CSS2D labels
-- **M3 ✓** — Command history, pane-unbound feedback
-- **M4 ✓** — Worker editor modal (add/edit/delete/assign), inter-agent messaging helper (`ao-msg`)

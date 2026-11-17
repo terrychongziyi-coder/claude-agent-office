@@ -83,6 +83,11 @@ h1{margin:0;font-size:22px;font-weight:800}
 .perm pre{margin:0;padding:12px 14px;border-radius:10px;background:var(--surface);border:1px solid #EBD3A4;font-family:var(--mono);font-size:13px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
 .pr{color:#7F7366}.pdir{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--muted)}
 .pact{display:flex;gap:10px;justify-content:flex-end}
+.qs{display:flex;flex-direction:column;gap:12px;max-height:38vh;overflow:auto}
+.q{margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:6px;min-width:0}.q legend{padding:0 0 6px;font-size:14px;font-weight:800;line-height:20px}
+.opt{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid #EBD3A4;cursor:pointer;font-size:13px;line-height:19px}
+.opt:has(input:checked){border-color:var(--primary)}.opt input{margin:3px 0 0;flex:none;accent-color:var(--primary)}.opt small{display:block;font-size:12px;color:var(--muted)}
+.other{border:1px solid #EBD3A4;border-radius:10px;background:var(--surface);padding:10px 12px;font-family:var(--ui);font-size:13px;color:var(--ink)}
 .sec-h{display:flex;align-items:center;justify-content:space-between}
 .lab{margin:0;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .logwrap{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px}
@@ -145,6 +150,40 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
 .mfr{display:flex;gap:10px;margin-left:auto}
 #hint.err{color:var(--error-x)}
 .ln .m.full{white-space:pre-wrap}
+.ln.live{animation:none}
+.sendbtns{display:flex;gap:10px}
+#stop[hidden]{display:none}
+.fld{min-width:0}.fld select,.fld input{min-width:0;width:100%}
+.fld input.mono{font-family:var(--mono);font-size:13px;font-weight:400}
+.fhint{font-size:12px;font-weight:600;color:var(--muted)}
+.sess p{margin:0;font-size:13px;line-height:19px;color:var(--muted)}
+/* group chat */
+#chat{position:fixed;right:24px;top:24px;bottom:24px;width:min(640px,calc(100vw - 48px));padding:20px;display:flex;flex-direction:column;gap:16px;z-index:5}
+#chat[hidden]{display:none}
+#c-who{font-size:13px;font-weight:600;color:var(--muted)}
+#c-log{flex:1;min-height:0;overflow:auto;padding:14px;border-radius:14px;background:var(--sunken);border:1px solid var(--border);display:flex;flex-direction:column;gap:12px}
+#c-rows{display:flex;flex-direction:column;gap:12px}
+.cm{display:flex;gap:10px;align-items:flex-start;animation:in .2s ease-out}
+.cm.you{justify-content:flex-end}
+.cm>div{min-width:0;max-width:85%}
+.cm .hd{display:flex;gap:8px;align-items:baseline;margin-bottom:3px;font-size:12px;font-weight:600;color:var(--muted)}
+.cm.you .hd{justify-content:flex-end}
+.cm .bd{padding:8px 12px;border-radius:14px;background:var(--surface);border:1px solid var(--border);font-size:14px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.cm.you .bd{background:var(--user-tint);border-color:#EBD3A4}
+.cm.err .bd{background:var(--error-t);border-color:var(--error-s);color:var(--error-x)}
+.who-btn{border:0;background:none;padding:0;font:inherit;font-size:13px;font-weight:800;color:var(--ink);cursor:pointer}
+.who-btn:hover{text-decoration:underline}
+#c-status{display:flex;flex-wrap:wrap;gap:6px}
+#c-status .badge{border:0;cursor:pointer;font-family:inherit}
+.cm.handoff .bd{border-style:dashed;border-color:var(--primary)}
+.pjt{display:inline-flex;align-items:center;gap:4px;max-width:100%;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pjt svg{flex:none}
+.cm.info{justify-content:center;font-size:12px;font-weight:600;color:var(--muted)}
+/* projects (editor) */
+#pj-list{display:flex;flex-direction:column;gap:4px}
+.pj{display:flex;align-items:center;gap:6px;padding:4px 4px 4px 10px;border-radius:12px}.pj:hover{background:var(--sunken)}
+.pj .who{cursor:pointer}.pj .nm{font-size:14px}.pj .rl{font-family:var(--mono);font-size:11px;font-weight:400;overflow-wrap:anywhere}
+.pj .iconbtn{width:36px;height:36px}
 </style>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/"}}</script>
 </head>
@@ -155,6 +194,7 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
   <div class="ovh"><div><div class="kicker">agent-office</div><h1>Your office</h1></div><span id="ov-count"></span></div>
   <div id="ov-sum"></div>
   <div id="ov-list"></div>
+  <button type="button" id="ov-chat" class="btn out"></button>
   <button type="button" id="ov-manage" class="btn out"></button>
 </aside>
 
@@ -163,11 +203,22 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
     <button type="button" id="p-close" class="iconbtn" aria-label="Close panel"></button></header>
   <div id="p-sess"></div>
   <div id="perm"></div>
-  <div class="logwrap"><div class="sec-h"><h3 class="lab">Recent output</h3></div><div id="log" role="log" aria-label="Recent output" aria-live="polite"></div></div>
+  <div class="logwrap"><div class="sec-h"><h3 class="lab">Recent output</h3></div><div id="log" role="log" aria-label="Recent output" aria-live="polite"><div id="log-rows"></div><div id="log-live"></div></div></div>
   <div style="display:flex;flex-direction:column;gap:8px">
     <label for="instr" class="lab">Instruction</label>
     <textarea id="instr" rows="4"></textarea>
-    <div class="sendrow"><span id="hint"></span><button type="button" id="send" class="btn pri"></button></div>
+    <div class="sendrow"><span id="hint"></span><div class="sendbtns"><button type="button" id="stop" class="btn sec" hidden>Stop</button><button type="button" id="send" class="btn pri"></button></div></div>
+  </div>
+</section>
+
+<section id="chat" class="glass" aria-label="Group chat" hidden>
+  <header class="ph"><div style="flex:1;min-width:0"><h2>Group chat</h2><div class="meta"><span id="c-who"></span></div></div>
+    <button type="button" id="c-close" class="iconbtn" aria-label="Close group chat"></button></header>
+  <div id="c-log" role="log" aria-label="Group chat messages" aria-live="polite"><div id="c-rows"></div><div id="c-status"></div></div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <label for="c-in" class="lab">Message</label>
+    <textarea id="c-in" rows="3" placeholder="@David fix the login bug    or    David, fix the login bug"></textarea>
+    <div class="sendrow"><span id="c-hint" class="fhint"></span><button type="button" id="c-send" class="btn pri"></button></div>
   </div>
 </section>
 
@@ -177,9 +228,17 @@ fieldset{border:0;margin:0;padding:0}legend{padding:0;margin-bottom:10px;font-si
   <section class="modal" role="dialog" aria-modal="true" aria-labelledby="ed-title">
     <header class="mh"><div><h2 id="ed-title">Manage workers</h2><p>Each worker is one running coding session with a desk in the office.</p></div><button type="button" id="ed-close" class="iconbtn" aria-label="Close"></button></header>
     <div class="mb">
-      <div class="mcol l"><h3 class="lab">Workers</h3><div id="ed-list"></div><button type="button" id="ed-add"></button></div>
+      <div class="mcol l"><h3 class="lab">Workers</h3><div id="ed-list"></div><button type="button" id="ed-add"></button>
+        <h3 class="lab" style="margin-top:16px">Projects</h3>
+        <span class="fhint">Send workers to a project from chat: @David #name …</span>
+        <div id="pj-list"></div>
+        <label class="fld">Project name<input id="pj-name" type="text" maxlength="20" spellcheck="false" autocomplete="off" placeholder="billing-api"></label>
+        <label class="fld">Folder<input id="pj-cwd" class="mono" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/projects/billing-api"></label>
+        <button type="button" id="pj-save" class="btn sec">Add or update project</button>
+        <p id="pj-err" class="ferr" role="alert" hidden></p>
+        <datalist id="pj-paths"></datalist></div>
       <form id="ed-form" onsubmit="return false"></form>
-      <aside class="mcol r" aria-label="Detected sessions"><div><h3 class="lab">Detected, not assigned (<span id="ed-detected-n"></span>)</h3><p class="empty" style="margin:4px 0 0">Sessions running on this machine without a desk.</p></div><div id="ed-detected" style="display:flex;flex-direction:column;gap:12px"></div></aside>
+      <aside class="mcol r" aria-label="Session"><h3 class="lab">Session</h3><div id="ed-info" style="display:flex;flex-direction:column;gap:12px"></div></aside>
     </div>
     <footer class="mf"><button type="button" id="ed-remove"></button><div class="mfr"><button type="button" id="ed-cancel" class="btn sec">Cancel</button><button type="button" id="ed-save" class="btn pri"></button></div></footer>
   </section>

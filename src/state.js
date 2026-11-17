@@ -12,11 +12,8 @@ class Session {
   constructor(id) {
     this.session_id = id;
     this.status = 'idle';
-    this.pane = null;
     this.cwd = null;
-    this.transcript_path = null;
     this.output = new RingBuffer(MAX_OUTPUT);
-    this.had_tool_activity = false;
     this.pending_permission = null;
     this.first_seen = new Date().toISOString();
     this.last_event = new Date().toISOString();
@@ -25,9 +22,7 @@ class Session {
     return {
       session_id: this.session_id,
       status: this.status,
-      pane: this.pane,
       cwd: this.cwd,
-      transcript_path: this.transcript_path,
       output: this.output.toArray(),
       pending_permission: this.pending_permission,
       first_seen: this.first_seen,
@@ -40,6 +35,7 @@ class AppState {
   constructor() {
     this.sessions = new Map();
     this.workers = [];
+    this.projects = []; // { name, cwd }
     this.clients = new Set();
   }
 
@@ -48,20 +44,6 @@ class AppState {
     const s = this.sessions.get(id);
     s.last_event = new Date().toISOString();
     return s;
-  }
-
-  updateStatus(session_id, status) {
-    this.session(session_id).status = status;
-  }
-
-  registerPane(session_id, pane, cwd) {
-    const s = this.session(session_id);
-    s.pane = pane;
-    if (cwd) s.cwd = cwd;
-  }
-
-  getPane(session_id) {
-    return this.sessions.get(session_id)?.pane ?? null;
   }
 
   pushOutput(session_id, entry) {
@@ -84,6 +66,7 @@ class AppState {
     return {
       sessions: [...this.sessions.values()].map(s => s.toJSON()),
       workers: this.workers,
+      projects: this.projects,
     };
   }
 }

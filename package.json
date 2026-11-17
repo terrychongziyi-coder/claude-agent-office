@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "hooks": "node tools/install-hooks.js"
+    "unhook": "node tools/remove-hooks.js",
+    "test": "node --test src/*.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",
